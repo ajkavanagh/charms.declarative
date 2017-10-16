@@ -35,16 +35,46 @@ JSON_ENCODE_OPTIONS = dict(
 __context__ = collections.OrderedDict()
 
 
-def context():
+def context(keys=None):
     """The context() is a readonly, lazy, data structure that resolves to
     dictionaries, lists and values.  It uses an OrderedDict() to keep keys
     in order, and when serialized (for comparison purposes only), it sorts the
     keys of dictionaries for consistency.
 
+    If keys is set, and not a string, then it is used to filter the context, to
+    provided a restricted set of keys.
+
+    :param keys: if keys is a list or string, then a restricting version of the
+        context is returned.
     :returns: read only dictionary-like object
     """
     global __context__
-    return AttrDict(__context__)
+    if keys is None:
+        return AttrDict(__context__)
+    ctxt = collections.OrderedDict()
+    if isinstance(keys, str):
+        keys = (str, )
+    elif not isinstance(keys, collections.abc.Sequence):
+        raise RuntimeError("keys passed to context is not a string or sequence"
+                           ": {}".format(keys))
+    for key in keys:
+        k = maybe_format_key(key)
+        try:
+            ctxt[k] = __context__[k]
+        except KeyError:
+            # TODO: log this error?
+            pass
+    return AttrDict(ctxt)
+
+
+def key_exists(key):
+    """Returns True if the key exists in the context.
+
+    :param key: str
+    :returns: boolean
+    """
+    global __context__
+    return maybe_format_key(key) in __context__
 
 
 def serialize_key(key=None):
@@ -54,13 +84,17 @@ def serialize_key(key=None):
     top-level key of it) to a compact string.  This is for comparason purposes,
     as the context is NOT supposed to be serialised to a backing store.
 
+    If there is no context at the key then None is returned
+
     :param key: OPTIONAL top level string key.
     :returns: JSON string repr of the data in the context, optionally at key
     :raises: KeyError if the key is not found (and not None)
     """
     c = context()
     if key is not None:
-        c = c[maybe_format_key(key)]
+        c = c.get(maybe_format_key(key), None)
+        if c is None:
+            return None
     return ContextJSONEncoder(**JSON_ENCODE_OPTIONS).encode(c)
 
 
@@ -139,8 +173,13 @@ class Callable():
         :raises AssertionError: if fn is not callable
         """
         assert callable(fn)
-        self.callable = fn
-        self.called = False
+        # self.callable = fn
+        # self.called = False
+        self._attrs = {
+            'callable': fn,
+            'called': False,
+            'result': None,
+        }
 
     def __call__(self):
         """Return the result of the function, when called with 'c'
@@ -153,26 +192,34 @@ class Callable():
         :returns: result of callable, possibly cached.
         :raises: may raise whatever the callable raises.
         """
-        if not self.called:
-            self.called = True
-            _callable = self.callable
+        if not self._attrs['called']:
+            self._attrs['called'] = True
+            _callable = self._attrs['callable']
             while True:
                 _callable = _callable()
                 if not callable(_callable):
                     break
-            self.result = _resolve_value(_callable)
-        return self.result
+            self._attrs['result'] = _resolve_value(_callable)
+        return self._attrs['result']
+
+    def __setattr__(self, key, value):
+        if key != '_attrs':
+            raise TypeError("{} does not allow setting attributes or items"
+                            .format(self.__class__.__name__))
+        super().__setattr__(key, value)
+
+    __setitem__ = __setattr__
 
     def __repr__(self):
-        if self.called:
-            s = "lamdba x: {}".format(repr(self.result))
+        if self._attrs['called']:
+            s = "lamdba x: {}".format(repr(self._attrs['result']))
         else:
-            s = repr(self.callable)
+            s = repr(self._attrs['callable'])
         return "Callable({})".format(s)
 
     def __str__(self):
-        if self.called:
-            return str(self.result)
+        if self._attrs['called']:
+            return str(self._attrs['result'])
         else:
             return "<not-called-yet>"
 
@@ -184,9 +231,13 @@ class Callable():
             return ContextJSONEncoder(**JSON_ENCODE_OPTIONS).encode(v)
 
 
-def context_caller_helper(f):
+def context_caller_helper(key, f):
     """This helper converts a function f(arg) -> f() where arg is resolved
     dynamically as a call to context().
+
+    The result is set into the context at the key provided.  If the key already
+    exists then a KeyExists error is raised when it is attempted to be set
+    during the call.
 
     This is to make it easier to insert callables into the context object
 
@@ -195,7 +246,22 @@ def context_caller_helper(f):
     :raises: AssertionError if 'f' is not callable.
     """
     assert callable(f)
-    return lambda: f(context())
+    key = maybe_format_key(key)
+    return lambda: set_context(key, f(context()))
+
+
+def copy(key):
+    """Create a late-binding copy function that copies from a name to another
+    context.
+
+    Usage would be something like:
+
+    set_context('copy-to', copy('copy-from'))
+
+    As context is read only, we can use a lambda to lazily evaluate the
+    context.get() operation and only do it when 'copy-to' is accessed.
+    """
+    return lambda: context().get(maybe_format_key(key))
 
 
 class BaseAttrDict(collections.abc.Mapping):
@@ -209,12 +275,23 @@ class BaseAttrDict(collections.abc.Mapping):
     """
 
     def __init__(self, data):
+        assert isinstance(data, collections.abc.Mapping)
         self._data = data.copy()
 
     def __getitem__(self, key):
         raise NotImplementedError()
 
+    def __setattr__(self, key, value):
+        if key != "_data":
+            raise TypeError("{} does not allow setting of attributes"
+                            .format(self.__class__.__name__))
+        super().__setattr__(key, value)
+
     __getattr__ = __getitem__
+
+    def __setitem__(self, key, value):
+        raise TypeError("{} does not allow setting of items"
+                        .format(self.__class__.__name__))
 
     def __len__(self):
         return len(self._data)
@@ -316,6 +393,10 @@ class ReadOnlyList(collections.abc.Sequence):
         if isinstance(value, Callable):
             value = value()
         return value
+
+    def __setitem__(self, key, value):
+        raise TypeError("{} does not allow setting of items"
+                        .format(self.__class__.__name__))
 
     def __len__(self):
         return len(self._data)
