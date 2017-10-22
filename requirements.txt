@@ -1,3 +1,3 @@
 PyYAML>=3.12
 # charmshelpers - pull from github to ensure that the latest is being used
-gti+https://github.com/juju/charm-helpers.git+https://.git#egg=charmhelpers
+git+https://github.com/juju/charm-helpers.git#egg=charmhelpers

@@ -24,6 +24,8 @@ from utils import (
 from ro_types import (
     resolve_value,
     ContextJSONEncoder,
+    ReadOnlyDict,
+    ReadOnlyWrapperDict,
 )
 
 
@@ -33,13 +35,6 @@ from exceptions import (
 
 # the global context is held here
 __context__ = collections.OrderedDict()
-
-JSON_ENCODE_OPTIONS = dict(
-    sort_keys=True,
-    allow_nan=False,
-    indent=None,
-    separators=(',', ':'),
-)
 
 
 def context(keys=None, _context=None):
@@ -62,7 +57,7 @@ def context(keys=None, _context=None):
         global __context__
         _context = __context__
     if keys is None:
-        return AttrDict(_context)
+        return ReadOnlyWrapperDict(_context)
     ctxt = collections.OrderedDict()
     if isinstance(keys, str):
         keys = (str, )
@@ -76,7 +71,7 @@ def context(keys=None, _context=None):
         except KeyError:
             # TODO: log this error?
             pass
-    return AttrDict(ctxt)
+    return ReadOnlyWrapperDict(ctxt)
 
 
 def key_exists(key, _context=None):
