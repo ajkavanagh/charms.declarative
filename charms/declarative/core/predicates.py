@@ -1,4 +1,4 @@
-from ro_types import (
+from charms.declarative.core.ro_types import (
     Callable,
 )
 
@@ -31,24 +31,33 @@ class DeferredBasicStringComparitor(object):
 
     def __eq__(self, other):
         assert isinstance(other, str) or isinstance(other, self.__class__)
+        if other not in self._list:
+            raise KeyError("Item '{}' is not in list '{}'"
+                           .format(other, self._list))
         return Callable(lambda: self.index == self._list.index(other))
 
     def __ne__(self, other):
-        return Callable(lambda: not self.__eq__(other))
+        return Callable(lambda: not self.__eq__(other)())
 
     def __lt__(self, other):
+        if other not in self._list:
+            raise KeyError("Item '{}' is not in list '{}'"
+                           .format(other, self._list))
         assert isinstance(other, str) or isinstance(other, self.__class__)
         return Callable(lambda: self.index < self._list.index(other))
 
     def __ge__(self, other):
-        return Callable(lambda: not self.__lt__(other))
+        return Callable(lambda: not self.__lt__(other)())
 
     def __gt__(self, other):
         assert isinstance(other, str) or isinstance(other, self.__class__)
+        if other not in self._list:
+            raise KeyError("Item '{}' is not in list '{}'"
+                           .format(other, self._list))
         return Callable(lambda: self.index > self._list.index(other))
 
     def __le__(self, other):
-        return Callable(lambda: not self.__gt__(other))
+        return Callable(lambda: not self.__gt__(other)())
 
     def __str__(self):
         """Always give back the item at the index so it can be used in
@@ -65,7 +74,8 @@ class DeferredBasicStringComparitor(object):
 
     def __repr__(self):
         return "{}(index={}, _list={})".format(self.__class__.__name__,
-                                              self.index, self._list)
+                                               repr(self.index),
+                                               repr(self._list))
 
 
 def _resolve_callable(c):
@@ -91,6 +101,9 @@ def p_any(*predicates):
     return Callable(lambda: any((_resolve_callable(p) for p in predicates)))
 
 
+p_or = p_any
+
+
 def p_all(*predicates):
     """Return a lambda that evaluates to True if ALL the predicates passed are
     Truely.  The predicates can be functions or values.
@@ -100,6 +113,9 @@ def p_all(*predicates):
     :raises: may raise anything, depending on the callables
     """
     return Callable(lambda: all((_resolve_callable(p) for p in predicates)))
+
+
+p_and = p_all
 
 
 def p_none(*predicates):
@@ -112,6 +128,7 @@ def p_none(*predicates):
     """
     return Callable(lambda: not all((_resolve_callable(p)
                                      for p in predicates)))
+
 
 def p_not(predicate):
     """Return a lambda that does the NOT of the predicate passed
@@ -150,24 +167,24 @@ class P(object):
                         _resolve_callable(other))
 
     def __ne__(self, other):
-        return Callable(lambda: not self.__eq__(other))
+        return Callable(lambda: not self.__eq__(other)())
 
     def __lt__(self, other):
         return Callable(lambda: _resolve_callable(self.item) <
                         _resolve_callable(other))
 
     def __ge__(self, other):
-        return Callable(lambda: not self.__lt__(other))
+        return Callable(lambda: not self.__lt__(other)())
 
     def __gt__(self, other):
         return Callable(lambda: _resolve_callable(self.item) >
                         _resolve_callable(other))
 
     def __le__(self, other):
-        return Callable(lambda: not self.__gt__(other))
+        return Callable(lambda: not self.__gt__(other)())
 
     def __str__(self):
         return str(self.item)
 
     def __repr__(self):
-        return "{}(item={})".format(self.__class__.__name__, self.item)
+        return "{}(item={})".format(self.__class__.__name__, repr(self.item))
