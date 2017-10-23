@@ -17,19 +17,20 @@ context()['one']['two']['three'], although both forms are supported.
 import collections
 import collections.abc
 
-from utils import (
+from charms.declarative.core.utils import (
     maybe_format_key,
 )
 
-from ro_types import (
+from charms.declarative.core.ro_types import (
     resolve_value,
     ContextJSONEncoder,
-    ReadOnlyDict,
+    # ReadOnlyDict,
     ReadOnlyWrapperDict,
+    JSON_ENCODE_OPTIONS,
 )
 
 
-from exceptions import (
+from charms.declarative.core.exceptions import (
     KeyExists,
 )
 
@@ -52,6 +53,7 @@ def context(keys=None, _context=None):
         __context__
     :returns: read only dictionary-like object
     :raises: AttributeError if the keys are not valid identifiers
+    :raises: KeyError if a keys is not None and the key is missing
     """
     if _context is None:
         global __context__
@@ -60,17 +62,13 @@ def context(keys=None, _context=None):
         return ReadOnlyWrapperDict(_context)
     ctxt = collections.OrderedDict()
     if isinstance(keys, str):
-        keys = (str, )
+        keys = (keys, )
     elif not isinstance(keys, collections.abc.Sequence):
         raise RuntimeError("keys passed to context is not a string or sequence"
                            ": {}".format(keys))
     for key in keys:
         k = maybe_format_key(key)
-        try:
-            ctxt[k] = _context[k]
-        except KeyError:
-            # TODO: log this error?
-            pass
+        ctxt[k] = _context[k]
     return ReadOnlyWrapperDict(ctxt)
 
 
@@ -133,31 +131,6 @@ def set_context(key, data, _context=None):
     if key in _context:
         raise KeyExists("Key '{}' already exists".format(key))
     _context[key] = resolve_value(data)
-
-
-def context_caller_helper(key, f, _context=None):
-    """This helper converts a function f(arg) -> f() where arg is resolved
-    dynamically as a call to context().
-
-    The result is set into the context at the key provided.  If the key already
-    exists then a KeyExists error is raised when it is attempted to be set
-    during the call.
-
-    This is to make it easier to insert callables into the context object
-
-    :param key: str for the key.
-    :param f: function in the form f(arg) -> result
-    :param _context: the context to work with; defaults to the global
-        __context__
-    :returns: function in the form f() -> result
-    :raises: AssertionError if 'f' is not callable.
-    """
-    if _context is None:
-        global __context__
-        _context = __context__
-    assert callable(f)
-    key = maybe_format_key(key)
-    return lambda: set_context(key, f(context(_context=_context)))
 
 
 def copy(key, _context=None):
