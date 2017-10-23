@@ -257,4 +257,4 @@ class TestContextJSONEncoder(unittest.TestCase):
             ro_types
             .ContextJSONEncoder(**ro_types.JSON_ENCODE_OPTIONS)
             .encode(xx),
-            '{"x":{"a":1,"b":2,"c":"3"},"y":[1,2,3],"z":"4"}')
+            '{"x":{"a":1,"b":2,"c":"3"},"y":[1,2,3],"z":4}')

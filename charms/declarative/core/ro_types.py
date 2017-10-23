@@ -36,6 +36,18 @@ def resolve_value(value):
     return value
 
 
+def maybe_resolve_callable(v):
+    """Return v if it's not a Callable, else call the value to resolve it.
+
+    :param v: maybe a Callable
+    :returns: v or v() if v isinstance(Callable)
+    :raises: Exception if the call raises an exception
+    """
+    if isinstance(v, Callable):
+        return v()
+    return v
+
+
 class Callable():
     """The Callable() class contains a lazy-evaluated callable function that
     has the signature:
@@ -127,6 +139,8 @@ class Callable():
 class ReadOnlyWrapperDict(collections.abc.Mapping):
     """A class to wrap an existing dict and make it readonly.  i.e. does not
     copy the keys, but just holds a reference to the original dict
+
+    It also needs to resolve a callable into the called version.
     """
 
     def __init__(self, data):
@@ -137,12 +151,12 @@ class ReadOnlyWrapperDict(collections.abc.Mapping):
 
     def __getitem__(self, key):
         if key not in self.__data__:
-            return KeyError("Item '{}' doesn't exist".format(key))
-        return self.__data__[key]
+            raise KeyError("Item '{}' doesn't exist".format(key))
+        return maybe_resolve_callable(self.__data__[key])
 
     def __getattr__(self, key):
         if key in self.__data__:
-            return self.__data__[key]
+            return maybe_resolve_callable(self.__data__[key])
         return super().__getattr__(key)
 
     def __setattr__(self, key, value):
@@ -176,7 +190,7 @@ class ReadOnlyWrapperDict(collections.abc.Mapping):
         """Serialise ourself (the OrderedDict) to a regular dictionary, which
         the default JSON encoder can use.
         """
-        return {k: v for k, v in self.items()}
+        return {k: maybe_resolve_callable(v) for k, v in self.__data__.items()}
 
 
 class ReadOnlyDict(collections.OrderedDict):
@@ -199,10 +213,8 @@ class ReadOnlyDict(collections.OrderedDict):
         :param key: string, or indexable object
         :returns: value of item
         """
-        value = super().__getitem__(maybe_format_key(key))
-        if isinstance(value, Callable):
-            value = value()
-        return value
+        return maybe_resolve_callable(
+            super().__getitem__(maybe_format_key(key)))
 
     __getattr__ = __getitem__
 
@@ -216,9 +228,7 @@ class ReadOnlyDict(collections.OrderedDict):
 
     def __iter__(self):
         for k, v in self.items():
-            if isinstance(v, Callable):
-                v = v()
-            yield k, v
+            yield k, maybe_resolve_callable(v)
 
     def __serialize__(self):
         """Serialise ourself (the OrderedDict) to a regular dictionary, which
@@ -243,10 +253,7 @@ class ReadOnlyList(tuple):
 
     def __getitem__(self, index):
         """Gets the item at index, resolving the values as needed"""
-        value = super().__getitem__(index)
-        if isinstance(value, Callable):
-            value = value()
-        return value
+        return maybe_resolve_callable(super().__getitem__(index))
 
     def __setattr__(self, key, value):
         raise TypeError("{} does not allow setting of items"
@@ -254,9 +261,7 @@ class ReadOnlyList(tuple):
 
     def __iter__(self):
         for v in super().__iter__():
-            if isinstance(v, Callable):
-                v = v()
-            yield v
+            yield maybe_resolve_callable(v)
 
     def __repr__(self):
         return ("{}(({}))"
