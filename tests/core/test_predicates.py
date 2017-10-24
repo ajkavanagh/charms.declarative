@@ -44,6 +44,10 @@ class TestDeferredBasicStringComparitor(unittest.TestCase):
                          "Comparitor(index=1, _list=('apple', 'cherry',"
                          " 'banana', 'kiwi', 'damson'))")
 
+    def test_base_class_checks_for_list(self):
+        with self.assertRaises(RuntimeError):
+            p = pred.DeferredBasicStringComparitor('helo')
+
 
 class TestPredicates(unittest.TestCase):
 

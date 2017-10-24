@@ -22,7 +22,8 @@ class DeferredBasicStringComparitor(object):
 
     def __init__(self, item):
         if self._list is None:
-            raise Exception("Must define the _list in the class definition!")
+            raise RuntimeError(
+                "Must define the _list in the class definition!")
         try:
             self.index = self._list.index(item)
         except Exception:
