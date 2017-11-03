@@ -26,11 +26,11 @@ the context strings.  This is deliberate.
 import collections
 import enum
 
-from utils import (
+from charms.declarative.core.utils import (
     maybe_format_key,
 )
 
-from exceptions import (
+from charms.declarative.core.exceptions import (
     KeyExists,
     AbortFunction,
     AbortExecution,
@@ -52,7 +52,7 @@ ReactorItemVariant = collections.namedtuple(
 ResolvedItem = collections.namedtuple(
     'ResolvedItem',
     'type_, key, name, item, dependents, dependencies, persistent')
-Type = enum.Enum('Type', 'INPUT COMPUTE')
+Type = enum.Enum('Type', 'INPUT COMPUTE OUTPUT')
 
 
 # TODO: turn this into a proper logging function
@@ -114,7 +114,6 @@ def _add_input(reactor, name, storable, predicates=None, persistent=True):
         changed.
     :raises AssertionError: if multiple defaults are provided.
     """
-    global __reactor__
     _assert_valid_entry(reactor, name, (predicates is None))
     key = maybe_format_key(name)
     if key not in reactor:
@@ -124,30 +123,37 @@ def _add_input(reactor, name, storable, predicates=None, persistent=True):
             "Attempting to add an input to cell '{}' that is a '{}'"
             .format(key, reactor[key].type_))
     reactor[key].variants.append(
-        ReactorItemVariant(storable, [], predicates or {}, persistent))
+        ReactorItemVariant(storable, [], predicates or [], bool(persistent)))
 
 
 def add_compute(*args, **kwargs):
     global __reactor__
-    _add_compute(__reactor__, *args, **kwargs)
+    _add_compute_or_output(__reactor__, Type.COMPUTE, *args, **kwargs)
 
 
-def _add_compute(reactor, name, function, dependencies,
-                 predicates=None, persistent=True):
-    """Add a compute cell with dependencies.  Note that they don't actually
-    have to exist; this will be checked when the 'run()' function is invoked
-    which will do a consistency check on the reactor core before proceeding.
+def add_output(*args, **kwargs):
+    global __reactor__
+    _add_compute_or_output(__reactor__, Type.OUTPUT, *args, **kwargs)
+
+
+def _add_compute_or_output(reactor, type_, name, function, dependencies,
+                           predicates=None, persistent=True):
+    """Add a compute or output cell with dependencies.  Note that they don't
+    actually have to exist; this will be checked when the 'run()' function is
+    invoked which will do a consistency check on the reactor core before
+    proceeding.
 
     The `function` is the item to put in the context.  If predicates is not
-    None then multiple functions may be added (via multiple calls to add_input)
-    and the FIRST to have all predicates as True will be used on a first added
-    basis.  `function` is a callable.
+    None then multiple functions may be added (via multiple calls to the
+    function) and the FIRST to have all predicates as True will be used on a
+    first added basis.  `function` is a callable.
 
     If predicates is not None, then all but one calls to add_compute() with the
     same `name` have to have predicates, except for one, which will be the
     default function for that `name`.
 
     :param reactor: the reactor to work with
+    :param type_: the type of cell, either Type.COMPUTE or Type.OUTPUT
     :param name: the cell's name
     :param function: what to call for the function
     :param dependencies: list of cell names as dependencies that trigger this
@@ -158,25 +164,29 @@ def _add_compute(reactor, name, function, dependencies,
         cell is always 'changed' after computation.
     """
     _assert_valid_entry(reactor, name, (predicates is None))
+    assert type_ in (Type.COMPUTE, Type.OUTPUT)
     assert callable(function), ("Param function must be callable for key '{}'"
                                 .format(name))
     key = maybe_format_key(name)
     dependencies_keys = [maybe_format_key(d) for d in dependencies]
     # look for a simple circular dependency
-    if name in dependencies:
+    if key in dependencies:
         raise KeyExists(
             "The dependency '{}' is the name of the compute.".format(name))
     if key not in reactor:
-        reactor[key] = ReactorItem(Type.COMPUTE, key, name, [], set())
-    elif reactor[key].type_ != Type.COMPUTE:
+        reactor[key] = ReactorItem(type_, key, name, [], set())
+    elif reactor[key].type_ != type_:
         raise ReactorError(
-            "Attempting to add a compute to cell '{}' that is a '{}'"
-            .format(key, reactor[key].type_))
+            "Attempting to add a {} to cell '{}' that is a '{}'"
+            .format(
+                'compute' if type_ == Type.COMPUTE else 'output',
+                key,
+                reactor[key].type_))
     reactor[key].variants.append(
         ReactorItemVariant(function,
                            dependencies_keys,
-                           predicates or {},
-                           persistent))
+                           predicates or [],
+                           bool(persistent)))
 
 
 def _calculate_dependents(reactor):
@@ -184,7 +194,7 @@ def _calculate_dependents(reactor):
     the variants for all the items.  Note that dependents is a set() and so
     will only have unique items.
 
-    :param reactor: the reactor to work on
+    :param reactor: the reactor to work on - changes SIDE-EFFECT
     :raises ReactorError: if the dependencies don't exist as key names
     """
     errors = []
@@ -203,26 +213,21 @@ def _calculate_dependents(reactor):
 
 def _check_reactor(reactor):
     """check the reactor for circular dependencies.
-    NOTE: _calculate_dependents() must have been called as otherwise there
-    will be nothing to check.
+    NOTE: this function calls _calculate_dependents(...) to ensure that all the
+    dependencies are calculated.
 
     :param reactor: the reactor to check.
     :raises ReactorError: if there is a problem
     """
-    errors = []
-    for key, reactor_item in reactor.items():
-        try:
-            _check_circular_dependencies(reactor,
-                                         [key],
-                                         reactor_item.dependents)
-        except ReactorError as e:
-            errors.append(str(e))
-    if errors:
+    _calculate_dependents(reactor)
+    try:
+        _check_circular_dependencies(reactor)
+    except ReactorError as e:
         raise ReactorError("Reactor has circular dependencies: '{}'"
-                           .format(", ".join(errors)))
+                           .format(str(e)))
 
 
-def _check_circular_dependencies(reactor, path, dependents):
+def _check_circular_dependencies(reactor):
     """Check for circular dependencies for any of the keys in path and
     descending into the remaining dependents.  A separate error string is
     generated and if there are any errors, ReactorError() is generated.
@@ -233,19 +238,34 @@ def _check_circular_dependencies(reactor, path, dependents):
     :raises ReactorError: in the event of a circular dependency
     """
     errors = []
-    for i, key in enumerate(path):
-        if key in dependents:
-            errors.append("{} has a cicular dependency with key: '{}'"
-                          .format("->".join(path[i:]), key))
-            if reactor[key].dependents:
-                try:
-                    _check_circular_dependencies(reactor,
-                                                 path + key,
-                                                 reactor[key].dependents)
-                except ReactorError as e:
-                    errors.append(str(e))
+    path_errors = set()
+    for key, reactor_item in reactor.items():
+        errors, path_errors = __check_circular_dependencies(
+            reactor, errors, path_errors, [key], reactor_item.dependents)
     if errors:
         raise ReactorError(", ".join(errors))
+
+
+def __check_circular_dependencies(reactor, errors, path_errors,
+                                  _path, _dependents):
+    for i, key in enumerate(_path):
+        if key in _dependents:
+            str_path = "->".join(_path[i:])
+            if str_path not in path_errors:
+                err = ("{} has a cicular dependency with key: '{}'"
+                       .format(str_path, key))
+                errors.append(err)
+                path_errors.add(str_path)
+    # now check the dependents recursively
+    for key in _dependents:
+        if key in _path:
+            continue
+        if reactor[key].dependents:
+                errors, path_errors = __check_circular_dependencies(
+                    reactor, errors, path_errors,
+                    _path + [key], reactor[key].dependents)
+    return errors, path_errors
+
 
 """
 Understanding how the reactor is run.
@@ -327,20 +347,6 @@ def _resolve_item(reactor_item):
                         select.persistent)
 
 
-def _find_unprocessed_dependencies(processed, resolved_item):
-    """Return a generator which outputs dependencies which haven't yet been
-    processed.  This is so that they can be queued before this item, if this
-    item has come to the beginning of the queue.
-
-    :param processed: (set) formatted keys that have been processed.
-    :param resolved_item: A ResolvedItem()
-    :return: a generator which yields unprocessed keys.
-    """
-    for d in resolved_item.dependencies:
-        if d not in processed:
-            yield d
-
-
 def _process_item(resolved_item, context_fn):
     """Process an item, assuming that the dependencies all exist.  If they
     don't then the access to the context the reactor provides will break.
@@ -372,8 +378,7 @@ def _process_item(resolved_item, context_fn):
             while callable(value):
                 value = value()
             return value
-        elif resolved_item.type_ == Type.COMPUTE:
-            # TODO: change context.context(...) to accept a limited return set.
+        elif resolved_item.type_ in (Type.COMPUTE, Type.OUTPUT):
             return resolved_item.item(context_fn(resolved_item.dependencies))
     except (AbortFunction, AbortExecution):
         raise
@@ -384,6 +389,20 @@ def _process_item(resolved_item, context_fn):
     # unexpected type
     raise AbortExecution("Got unexpected type: {} for item: {}"
                          .format(resolved_item.type_, resolved_item))
+
+
+def _find_unprocessed_dependencies(processed, resolved_item):
+    """Return a generator which outputs dependencies which haven't yet been
+    processed.  This is so that they can be queued before this item, if this
+    item has come to the beginning of the queue.
+
+    :param processed: (set) formatted keys that have been processed.
+    :param resolved_item: A ResolvedItem()
+    :return: a generator which yields unprocessed keys.
+    """
+    for d in resolved_item.dependencies:
+        if d not in processed:
+            yield d
 
 
 def _initialise_queue_with_inputs(reactor):
@@ -425,8 +444,9 @@ def _run(reactor, detect_change_fn, get_context_fn, set_context_fn):
     :param set_context_fn: set_context_fn(key, value) -> None
     :raises: AbortExecution() if a dependent functions fails or raises this
         explicitly to exit the hook.
+    :raises: ReactorError() if the reactor is not properly formed.
     """
-    # function may raise AbortExecution
+    _check_reactor(reactor)
     queue = collections.deque(_initialise_queue_with_inputs(reactor))
     processed = set()
     while queue:
@@ -449,55 +469,22 @@ def _run(reactor, detect_change_fn, get_context_fn, set_context_fn):
             # we add this as processed, because even though it aborted, it
             # still has to show as done.
             processed.add(cell.key)
-            set_context_fn(cell.name, None)
+            if cell.type_ != Type.OUTPUT:
+                set_context_fn(cell.name, None)
             continue
         except AbortExecution:
             raise
         except Exception as e:
-            # somethignvery odd happened
+            # something very odd happened
+            log_exception(e)
             raise AbortExecution("Weirdness: '{}' occured with '{}'"
                                  .format(e, cell))
         # store the value in the context, and add it to processed.
         processed.add(cell.key)
-        set_context_fn(cell.name, value)
-        if not cell.persistent or detect_change_fn(cell.name):
+        if cell.type_ != Type.OUTPUT:
+            set_context_fn(cell.name, value)
+        if (not cell.persistent or
+                cell.type_ == Type.OUTPUT or
+                detect_change_fn(cell.name)):
             queue.extend((_resolve_item(reactor[d]) for d in cell.dependents
                           if d not in processed))
-
-
-def f1(ctxt):
-    print("f1() called with {}".format(ctxt))
-    return ctxt['i1'] + ctxt['i2']
-
-
-def f2(ctxt):
-    print("f2() called with {}".format(ctxt))
-    return ctxt['c1'] * 2
-
-
-def detect_change(*args):
-    print("detect_change: ", args)
-    return 'i' in args[0] or args[0] == 'c1'
-
-
-if __name__ == '__main__':
-    # let's set up a test scenario
-    add_input('i1', 1)
-    add_input('i2', 2)
-    add_compute('c1', f1, ('i1', 'i2'))
-    add_compute('c2', f2, ('c1', ))
-    _calculate_dependents(__reactor__)
-    _check_reactor(__reactor__)
-    print("Calculated  dependents, and checked reactor")
-    import pprint
-    pprint.pprint(__reactor__)
-    ctxt = {}
-
-    def get_item(l):
-        return {k: v for k, v in ctxt.items() if k in l}
-
-    def set_item(k, v):
-        ctxt[k] = v
-
-    _run(__reactor__, detect_change, get_item, set_item)
-    print("ctxt afterwards is:", ctxt)

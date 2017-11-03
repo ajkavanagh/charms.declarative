@@ -31,6 +31,16 @@ class TestDeferredBasicStringComparitor(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.Comparitor('pineapple')
 
+    def test_string_compare_equal_not_in_list(self):
+        p = self.Comparitor('cherry')
+        with self.assertRaises(KeyError):
+            self.assertTrue(p == 'pineapple')
+
+    def test_string_compare_less_than(self):
+        p = self.Comparitor('cherry')
+        with self.assertRaises(KeyError):
+            self.assertTrue(p < 'pineapple')
+
     def test_string_comparitor_compare_not_in_list(self):
         p = self.Comparitor('cherry')
         with self.assertRaises(KeyError):

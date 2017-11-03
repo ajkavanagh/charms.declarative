@@ -47,3 +47,6 @@ class TestUtils(unittest.TestCase):
         for p in patterns:
             with self.assertRaises(AttributeError):
                 u.maybe_format_key(p)
+
+    def test_format_key_is_identity_when_not_passed_string(self):
+        self.assertEqual(u.maybe_format_key(1), 1)

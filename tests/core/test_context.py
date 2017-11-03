@@ -28,6 +28,12 @@ class TestContext(unittest.TestCase):
             context.set_context('a', 5)
             self.assertEqual(context.__context__['a'], 5)
 
+    def test_set_context_duplicate_key(self):
+        ctxt = collections.OrderedDict()
+        context.set_context('a', 10, _context=ctxt)
+        with self.assertRaises(context.KeyExists):
+            context.set_context('a', 10, _context=ctxt)
+
     def test_get_context(self):
         ctxt = collections.OrderedDict()
         context.set_context('a', 10, _context=ctxt)

@@ -116,6 +116,11 @@ class TestReadOnlyWrapperDict(unittest.TestCase):
         self.assertEqual(x.a, 1)
         self.assertEqual(x.b, 2)
 
+    def test_getattr_not_an_item(self):
+        x = ro_types.ReadOnlyWrapperDict({'a': 1})
+        with self.assertRaises(AttributeError):
+            x.b
+
     def test_setattr(self):
         with self.assertRaises(TypeError):
             x = ro_types.ReadOnlyWrapperDict({'a': 1, 'b': 2})

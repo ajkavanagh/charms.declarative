@@ -279,10 +279,13 @@ class ContextJSONEncoder(json.JSONEncoder):
     """This is a custom JSONEncoder that knows how to serialise Callable(),
     BaseAttrDict and ReadOnlyList.
     """
+    # Note the "pragma: no cover" is due to the line being currently impossible
+    # to reach as the classes all conspire to ensure there is no default that
+    # can be called!  The line is in for insurance, if the implementation is
+    # changed.
 
     def default(self, o):
-        print("encoding: ", o)
         if isinstance(o, (Callable, ReadOnlyDict, ReadOnlyList,
                           ReadOnlyWrapperDict)):
             return o.__serialize__()
-        return json.JSONEncoder.default(self, o)
+        return json.JSONEncoder.default(self, o)  # pragma: no cover
